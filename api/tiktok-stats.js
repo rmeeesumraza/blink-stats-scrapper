@@ -10,13 +10,18 @@ module.exports = async (req, res) => {
 
   let browser;
   try {
-    // 1) Get the executable path (string) directly
-    const execPath = chromium.executablePath;
-    if (!execPath) {
-      throw new Error('Chrome executable path not found');
+    // 1) Resolve execPath whether it's a function or string
+    let execPath;
+    if (typeof chromium.executablePath === 'function') {
+      execPath = await chromium.executablePath();
+    } else {
+      execPath = chromium.executablePath;
+    }
+    if (!execPath || typeof execPath !== 'string') {
+      throw new Error('Chrome executable path not found or invalid');
     }
 
-    // 2) Launch Puppeteer with that binary
+    // 2) Launch headless Chrome
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: execPath,
@@ -25,38 +30,32 @@ module.exports = async (req, res) => {
     });
 
     const page = await browser.newPage();
-    // Spoof a desktop UA
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
       'AppleWebKit/537.36 (KHTML, like Gecko) ' +
       'Chrome/113.0.0.0 Safari/537.36'
     );
-
-    // 3) Navigate and wait for TikTok’s JS to render
     await page.goto(`https://www.tiktok.com/@${username}`, {
       waitUntil: 'networkidle2',
       timeout:    30000,
     });
 
-    // 4) Extract the hydrated JSON and pull stats
+    // 3) Extract the hydrated JSON and stats
     const result = await page.evaluate(() => {
       const state = window['SIGI_STATE'] || window.__NEXT_DATA__;
       if (!state) return null;
-
-      function findIM(obj) {
-        if (obj && typeof obj === 'object') {
-          if (obj.ItemModule) return obj.ItemModule;
-          for (const k in obj) {
-            const f = findIM(obj[k]);
+      function findIM(o) {
+        if (o && typeof o === 'object') {
+          if (o.ItemModule) return o.ItemModule;
+          for (const k in o) {
+            const f = findIM(o[k]);
             if (f) return f;
           }
         }
         return null;
       }
-
       const items = findIM(state);
       if (!items) return null;
-
       const vidId = Object.keys(items)[0];
       const stats = items[vidId].stats || {};
       return {
@@ -69,7 +68,6 @@ module.exports = async (req, res) => {
       throw new Error('no stats found');
     }
 
-    // 5) Return JSON
     res.setHeader('Content-Type', 'application/json');
     return res.status(200).json(result);
   } catch (err) {
