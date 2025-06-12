@@ -1,31 +1,23 @@
 // api/tiktok-stats.js
-const chromium  = require('chrome-aws-lambda');
+const chromium  = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 
 module.exports = async (req, res) => {
-  const username = (req.query.username || '').trim();
-  if (!username) {
+  const user = (req.query.username || '').trim();
+  if (!user) {
     return res.status(400).json({ error: 'no username provided' });
   }
 
   let browser;
   try {
-    // 1) Resolve execPath whether it's a function or string
-    let execPath;
-    if (typeof chromium.executablePath === 'function') {
-      execPath = await chromium.executablePath();
-    } else {
-      execPath = chromium.executablePath;
-    }
-    if (!execPath || typeof execPath !== 'string') {
-      throw new Error('Chrome executable path not found or invalid');
-    }
+    // Sparticuz gives you a valid execPath on Vercel
+    const execPath = chromium.executablePath;
+    if (!execPath) throw new Error('no chromium binary');
 
-    // 2) Launch headless Chrome
     browser = await puppeteer.launch({
-      args: chromium.args,
       executablePath: execPath,
-      headless: chromium.headless,
+      args:           chromium.args,
+      headless:       chromium.headless,
       defaultViewport: chromium.defaultViewport,
     });
 
@@ -35,12 +27,11 @@ module.exports = async (req, res) => {
       'AppleWebKit/537.36 (KHTML, like Gecko) ' +
       'Chrome/113.0.0.0 Safari/537.36'
     );
-    await page.goto(`https://www.tiktok.com/@${username}`, {
+    await page.goto(`https://www.tiktok.com/@${user}`, {
       waitUntil: 'networkidle2',
       timeout:    30000,
     });
 
-    // 3) Extract the hydrated JSON and stats
     const result = await page.evaluate(() => {
       const state = window['SIGI_STATE'] || window.__NEXT_DATA__;
       if (!state) return null;
@@ -64,15 +55,13 @@ module.exports = async (req, res) => {
       };
     });
 
-    if (!result) {
-      throw new Error('no stats found');
-    }
+    if (!result) throw new Error('no stats found');
 
     res.setHeader('Content-Type', 'application/json');
     return res.status(200).json(result);
-  } catch (err) {
-    console.error('Scrape error:', err);
-    return res.status(500).json({ error: err.message });
+  } catch (e) {
+    console.error('Scrape error:', e);
+    return res.status(500).json({ error: e.message });
   } finally {
     if (browser) await browser.close();
   }
