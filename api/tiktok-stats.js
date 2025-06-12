@@ -10,13 +10,13 @@ module.exports = async (req, res) => {
 
   let browser;
   try {
-    // 1) resolve the actual Chrome binary path
+    // 1) Get the actual path to the bundled Chromium binary
     const execPath = await chromium.executablePath();
     if (!execPath) {
       throw new Error('Chrome executable not found');
     }
 
-    // 2) launch Puppeteer using that path
+    // 2) Launch Chrome via puppeteer-core
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: execPath,
@@ -25,32 +25,36 @@ module.exports = async (req, res) => {
     });
 
     const page = await browser.newPage();
+    // 3) Spoof a desktop UA so TikTok serves the full page
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
       'AppleWebKit/537.36 (KHTML, like Gecko) ' +
       'Chrome/113.0.0.0 Safari/537.36'
     );
+
+    // 4) Navigate and wait for TikTok’s JS to hydrate the page
     await page.goto(`https://www.tiktok.com/@${username}`, {
       waitUntil: 'networkidle2',
-      timeout:    30000,
+      timeout: 30000,
     });
 
-    // 3) scrape window.SIGI_STATE or __NEXT_DATA__
+    // 5) Extract the client-side JSON and pull out stats
     const result = await page.evaluate(() => {
       const state = window['SIGI_STATE'] || window.__NEXT_DATA__;
       if (!state) return null;
 
-      function findIM(o) {
-        if (o && typeof o === 'object') {
-          if (o.ItemModule) return o.ItemModule;
-          for (const k in o) {
-            const f = findIM(o[k]);
-            if (f) return f;
+      function findItemModule(obj) {
+        if (obj && typeof obj === 'object') {
+          if (obj.ItemModule) return obj.ItemModule;
+          for (const k in obj) {
+            const found = findItemModule(obj[k]);
+            if (found) return found;
           }
         }
         return null;
       }
-      const items = findIM(state);
+
+      const items = findItemModule(state);
       if (!items) return null;
 
       const vidId = Object.keys(items)[0];
@@ -62,7 +66,7 @@ module.exports = async (req, res) => {
     });
 
     if (!result) {
-      throw new Error('no stats found');
+      throw new Error('no stats found on page');
     }
 
     res.setHeader('Content-Type', 'application/json');
