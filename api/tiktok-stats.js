@@ -10,13 +10,13 @@ module.exports = async (req, res) => {
 
   let browser;
   try {
-    // 1. Resolve the bundled Chrome binary path
-    const execPath = await chromium.executablePath();
+    // 1) Get the executable path (string) directly
+    const execPath = chromium.executablePath;
     if (!execPath) {
-      throw new Error('Chrome executable not found');
+      throw new Error('Chrome executable path not found');
     }
 
-    // 2. Launch headless Chrome via puppeteer-core
+    // 2) Launch Puppeteer with that binary
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: execPath,
@@ -25,19 +25,20 @@ module.exports = async (req, res) => {
     });
 
     const page = await browser.newPage();
-    // 3. Spoof a desktop UA
+    // Spoof a desktop UA
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
       'AppleWebKit/537.36 (KHTML, like Gecko) ' +
       'Chrome/113.0.0.0 Safari/537.36'
     );
-    // 4. Navigate & wait for TikTok's JS to hydrate
+
+    // 3) Navigate and wait for TikTok’s JS to render
     await page.goto(`https://www.tiktok.com/@${username}`, {
       waitUntil: 'networkidle2',
       timeout:    30000,
     });
 
-    // 5. Extract the hydrated JSON and pull out stats
+    // 4) Extract the hydrated JSON and pull stats
     const result = await page.evaluate(() => {
       const state = window['SIGI_STATE'] || window.__NEXT_DATA__;
       if (!state) return null;
@@ -46,8 +47,8 @@ module.exports = async (req, res) => {
         if (obj && typeof obj === 'object') {
           if (obj.ItemModule) return obj.ItemModule;
           for (const k in obj) {
-            const found = findIM(obj[k]);
-            if (found) return found;
+            const f = findIM(obj[k]);
+            if (f) return f;
           }
         }
         return null;
@@ -64,9 +65,11 @@ module.exports = async (req, res) => {
       };
     });
 
-    if (!result) throw new Error('no stats found');
+    if (!result) {
+      throw new Error('no stats found');
+    }
 
-    // 6. Return JSON
+    // 5) Return JSON
     res.setHeader('Content-Type', 'application/json');
     return res.status(200).json(result);
   } catch (err) {
